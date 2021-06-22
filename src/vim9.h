@@ -91,7 +91,7 @@ typedef enum {
     ISN_PCALL,	    // call partial, use isn_arg.pfunc
     ISN_PCALL_END,  // cleanup after ISN_PCALL with cpf_top set
     ISN_RETURN,	    // return, result is on top of stack
-    ISN_RETURN_ZERO, // Push zero, then return
+    ISN_RETURN_VOID, // Push void, then return
     ISN_FUNCREF,    // push a function ref to dfunc isn_arg.funcref
     ISN_NEWFUNC,    // create a global function from a lambda function
     ISN_DEF,	    // list functions
@@ -168,6 +168,9 @@ typedef enum {
     ISN_PROF_START, // start a line for profiling
     ISN_PROF_END,   // end a line for profiling
 
+    ISN_DEBUG,	    // check for debug breakpoint, isn_arg.number is current
+		    // number of local variables
+
     ISN_UNPACK,	    // unpack list into items, uses isn_arg.unpack
     ISN_SHUFFLE,    // move item on stack up or down
     ISN_DROP,	    // pop stack and discard value
@@ -205,6 +208,12 @@ typedef struct {
     char_u  *cuf_name;
     int	    cuf_argcount;   // number of arguments on top of stack
 } cufunc_T;
+
+// arguments to ISN_GETITEM
+typedef struct {
+    varnumber_T	gi_index;
+    int		gi_with_op;
+} getitem_T;
 
 typedef enum {
     JUMP_ALWAYS,
@@ -429,6 +438,7 @@ struct isn_S {
 	isn_T		    *instr;
 	tostring_T	    tostring;
 	tobool_T	    tobool;
+	getitem_T	    getitem;
     } isn_arg;
 };
 
@@ -445,6 +455,7 @@ struct dfunc_S {
 				    // was compiled.
 
     garray_T	df_def_args_isn;    // default argument instructions
+    garray_T	df_var_names;	    // names of local vars
 
     // After compiling "df_instr" and/or "df_instr_prof" is not NULL.
     isn_T	*df_instr;	    // function body to be executed
@@ -453,6 +464,8 @@ struct dfunc_S {
     isn_T	*df_instr_prof;	     // like "df_instr" with profiling
     int		df_instr_prof_count; // size of "df_instr_prof"
 #endif
+    isn_T	*df_instr_debug;      // like "df_instr" with debugging
+    int		df_instr_debug_count; // size of "df_instr_debug"
 
     int		df_varcount;	    // number of local variables
     int		df_has_closure;	    // one if a closure was created
@@ -489,10 +502,17 @@ extern garray_T def_functions;
 // Used for "lnum" when a range is to be taken from the stack and "!" is used.
 #define LNUM_VARIABLE_RANGE_ABOVE -888
 
+// Keep in sync with COMPILE_TYPE()
 #ifdef FEAT_PROFILE
 # define INSTRUCTIONS(dfunc) \
-	((do_profiling == PROF_YES && (dfunc->df_ufunc)->uf_profiling) \
-	? (dfunc)->df_instr_prof : (dfunc)->df_instr)
+	(debug_break_level > 0 || dfunc->df_ufunc->uf_has_breakpoint \
+	    ? (dfunc)->df_instr_debug \
+	    : ((do_profiling == PROF_YES && (dfunc->df_ufunc)->uf_profiling) \
+		? (dfunc)->df_instr_prof \
+		: (dfunc)->df_instr))
 #else
-# define INSTRUCTIONS(dfunc) ((dfunc)->df_instr)
+# define INSTRUCTIONS(dfunc) \
+	(debug_break_level > 0 \
+		? (dfunc)->df_instr_debug \
+		: (dfunc)->df_instr)
 #endif

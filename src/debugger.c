@@ -218,7 +218,7 @@ do_debug(char_u *cmd)
 
 	    if (last_cmd != 0)
 	    {
-		// Execute debug command: decided where to break next and
+		// Execute debug command: decide where to break next and
 		// return.
 		switch (last_cmd)
 		{
@@ -606,7 +606,7 @@ dbg_parsearg(
     }
 
     if (bp->dbg_type == DBG_FUNC)
-	bp->dbg_name = vim_strsave(p);
+	bp->dbg_name = vim_strsave(STRNCMP(p, "g:", 2) == 0 ? p + 2 : p);
     else if (here)
 	bp->dbg_name = vim_strsave(curbuf->b_ffname);
     else if (bp->dbg_type == DBG_EXPR)
