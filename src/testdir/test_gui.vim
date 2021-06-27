@@ -882,7 +882,7 @@ func Test_gui_mouse_event()
   new
   call setline(1, ['one two three', 'four five six'])
 
-  " place the cursor using left click
+  " place the cursor using left click in normal mode
   call cursor(1, 1)
   call test_gui_mouse_event(0, 2, 4, 0, 0)
   call test_gui_mouse_event(3, 2, 4, 0, 0)
@@ -1092,9 +1092,159 @@ func Test_gui_mouse_event()
   set mouse&
   let &guioptions = save_guioptions
 
+  " Test invalid parameters for test_gui_mouse_event()
+  call assert_fails('call test_gui_mouse_event("", 1, 2, 3, 4)', 'E474:')
+  call assert_fails('call test_gui_mouse_event(0, "", 2, 3, 4)', 'E474:')
+  call assert_fails('call test_gui_mouse_event(0, 1, "", 3, 4)', 'E474:')
+  call assert_fails('call test_gui_mouse_event(0, 1, 2, "", 4)', 'E474:')
+  call assert_fails('call test_gui_mouse_event(0, 1, 2, 3, "")', 'E474:')
+
   bw!
   call test_override('no_query_mouse', 0)
   set mousemodel&
+endfunc
+
+" Test for 'guitablabel' and 'guitabtooltip' options
+func TestGuiTabLabel()
+  call add(g:TabLabels, v:lnum + 100)
+  let bufnrlist = tabpagebuflist(v:lnum)
+  return bufname(bufnrlist[tabpagewinnr(v:lnum) - 1])
+endfunc
+
+func TestGuiTabToolTip()
+  call add(g:TabToolTips, v:lnum + 200)
+  let bufnrlist = tabpagebuflist(v:lnum)
+  return bufname(bufnrlist[tabpagewinnr(v:lnum) - 1])
+endfunc
+
+func Test_gui_tablabel_tooltip()
+  %bw!
+  " Removing the tabline at the end of this test, reduces the window height by
+  " one. Save and restore it after the test.
+  let save_lines = &lines
+  edit one
+  set modified
+  tabnew two
+  set modified
+  tabnew three
+  set modified
+  let g:TabLabels = []
+  set guitablabel=%{TestGuiTabLabel()}
+  call test_override('starting', 1)
+  redrawtabline
+  call test_override('starting', 0)
+  call assert_true(index(g:TabLabels, 101) != -1)
+  call assert_true(index(g:TabLabels, 102) != -1)
+  call assert_true(index(g:TabLabels, 103) != -1)
+  set guitablabel&
+  unlet g:TabLabels
+
+  if has('gui_gtk')
+    " Only on GTK+, the tooltip function is called even if the mouse is not
+    " on the tabline. on Win32 and Motif, the tooltip function is called only
+    " when the mouse pointer is over the tabline.
+    let g:TabToolTips = []
+    set guitabtooltip=%{TestGuiTabToolTip()}
+    call test_override('starting', 1)
+    redrawtabline
+    call test_override('starting', 0)
+    call assert_true(index(g:TabToolTips, 201) != -1)
+    call assert_true(index(g:TabToolTips, 202) != -1)
+    call assert_true(index(g:TabToolTips, 203) != -1)
+    set guitabtooltip&
+    unlet g:TabToolTips
+  endif
+  %bw!
+  let &lines = save_lines
+endfunc
+
+" Test for dropping files into a window in GUI
+func DropFilesInCmdLine()
+  call feedkeys(":\"", 'L')
+  call test_gui_drop_files(['a.c', 'b.c'], &lines, 1, 0)
+  call feedkeys("\<CR>", 'L')
+endfunc
+
+func Test_gui_drop_files()
+  call assert_fails('call test_gui_drop_files(1, 1, 1, 0)', 'E474:')
+  call assert_fails('call test_gui_drop_files(["x"], "", 1, 0)', 'E474:')
+  call assert_fails('call test_gui_drop_files(["x"], 1, "", 0)', 'E474:')
+  call assert_fails('call test_gui_drop_files(["x"], 1, 1, "")', 'E474:')
+
+  %bw!
+  %argdelete
+  call test_gui_drop_files([], 1, 1, 0)
+  call assert_equal([], argv())
+  call test_gui_drop_files([1, 2], 1, 1, 0)
+  call assert_equal([], argv())
+
+  call test_gui_drop_files(['a.c', 'b.c'], 1, 1, 0)
+  call assert_equal(['a.c', 'b.c'], argv())
+  %bw!
+  %argdelete
+  call test_gui_drop_files([], 1, 1, 0)
+  call assert_equal([], argv())
+  %bw!
+  " if the buffer in the window is modified, then the file should be opened in
+  " a new window
+  set modified
+  call test_gui_drop_files(['x.c', 'y.c'], 1, 1, 0)
+  call assert_equal(['x.c', 'y.c'], argv())
+  call assert_equal(2, winnr('$'))
+  call assert_equal('x.c', bufname(winbufnr(1)))
+  %bw!
+  %argdelete
+  " if Ctrl is pressed, then the file should be opened in a new window
+  call test_gui_drop_files(['s.py', 't.py'], 1, 1, 0x10)
+  call assert_equal(['s.py', 't.py'], argv())
+  call assert_equal(2, winnr('$'))
+  call assert_equal('s.py', bufname(winbufnr(1)))
+  %bw!
+  %argdelete
+  " drop the files in a non-current window
+  belowright new
+  call test_gui_drop_files(['a.py', 'b.py'], 1, 1, 0)
+  call assert_equal(['a.py', 'b.py'], argv())
+  call assert_equal(2, winnr('$'))
+  call assert_equal(1, winnr())
+  call assert_equal('a.py', bufname(winbufnr(1)))
+  %bw!
+  %argdelete
+  " pressing shift when dropping files should change directory
+  let save_cwd = getcwd()
+  call mkdir('Xdir1')
+  call writefile([], 'Xdir1/Xfile1')
+  call writefile([], 'Xdir1/Xfile2')
+  call test_gui_drop_files(['Xdir1/Xfile1', 'Xdir1/Xfile2'], 1, 1, 0x4)
+  call assert_equal('Xdir1', fnamemodify(getcwd(), ':t'))
+  call assert_equal('Xfile1', @%)
+  call chdir(save_cwd)
+  " pressing shift when dropping directory and files should change directory
+  call test_gui_drop_files(['Xdir1', 'Xdir1/Xfile2'], 1, 1, 0x4)
+  call assert_equal('Xdir1', fnamemodify(getcwd(), ':t'))
+  call assert_equal('Xdir1', fnamemodify(@%, ':t'))
+  call chdir(save_cwd)
+  %bw!
+  %argdelete
+  " dropping a directory should edit it
+  call test_gui_drop_files(['Xdir1'], 1, 1, 0)
+  call assert_equal('Xdir1', @%)
+  %bw!
+  %argdelete
+  " dropping only a directory name with Shift should ignore it
+  call test_gui_drop_files(['Xdir1'], 1, 1, 0x4)
+  call assert_equal('', @%)
+  %bw!
+  %argdelete
+  call delete('Xdir1', 'rf')
+  " drop files in the command line. The GUI drop files adds the file names to
+  " the low level input buffer. So need to use a cmdline map and feedkeys()
+  " with 'Lx!' to process it in this function itself.
+  cnoremap <expr> <buffer> <F4> DropFilesInCmdLine()
+  call feedkeys(":\"\<F4>\<CR>", 'xt')
+  call feedkeys('k', 'Lx!')
+  call assert_equal('"a.c b.c', @:)
+  cunmap <buffer> <F4>
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab
